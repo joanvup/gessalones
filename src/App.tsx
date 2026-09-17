@@ -19,6 +19,9 @@ import { AdminPanelModal } from './components/AdminPanelModal';
 import { DetailedReportModal } from './components/DetailedReportModal';
 import { StudentMoveModal } from './components/StudentMoveModal';
 import { EditRoomModal } from './components/EditRoomModal';
+import { UserManagementModal } from './components/UserManagementModal';
+import { Login } from './components/Login';
+import { useAuth } from './components/AuthContext';
 import { 
   School, 
   Users, 
@@ -29,6 +32,8 @@ import {
 } from 'lucide-react';
 
 export default function App() {
+  const { user, token, loading } = useAuth();
+  
   // Primary state
   const [students, setStudents] = useState<Student[]>([]);
   const [rooms, setRooms] = useState<ClassroomGroup[]>([]);
@@ -38,6 +43,7 @@ export default function App() {
   // Modals state
   const [isAdminOpen, setIsAdminOpen] = useState<boolean>(false);
   const [isReportOpen, setIsReportOpen] = useState<boolean>(false);
+  const [isSecurityOpen, setIsSecurityOpen] = useState<boolean>(false);
   const [movingStudent, setMovingStudent] = useState<Student | null>(null);
   const [editingRoom, setEditingRoom] = useState<ClassroomGroup | null>(null);
   
@@ -54,7 +60,11 @@ export default function App() {
 
   // SQLite Fetch on mount
   useEffect(() => {
-    fetch('/api/state')
+    if (!token) return;
+
+    fetch('/api/state', {
+      headers: { Authorization: `Bearer ${token}` }
+    })
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch from SQLite backend');
         return res.json();
@@ -66,26 +76,28 @@ export default function App() {
       })
       .catch(err => {
         console.error(err);
-        // Fallback for UI if DB fetch fails
         setIsInitialized(true);
       });
-  }, []);
+  }, [token]);
 
   // SQLite Auto-sync on changes
   useEffect(() => {
-    if (!isInitialized) return;
+    if (!isInitialized || !token) return;
     
     // Debounce save to prevent saving on every rapid state update (e.g. during batch ops)
     const syncTimeout = setTimeout(() => {
       fetch('/api/state', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
         body: JSON.stringify({ students, rooms })
       }).catch(err => console.error('Failed to sync to SQLite DB:', err));
     }, 600);
     
     return () => clearTimeout(syncTimeout);
-  }, [students, rooms, isInitialized]);
+  }, [students, rooms, isInitialized, token]);
 
   // Academic Levels available
   const academicLevels = useMemo(() => {
@@ -310,12 +322,21 @@ export default function App() {
   const totalCapacity = rooms.reduce((sum, r) => sum + r.capacity, 0);
   const assignedCount = students.filter(s => !!s.assignedRoomId).length;
 
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500">Cargando...</div>;
+  }
+
+  if (!user) {
+    return <Login />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-100/70 text-slate-900 flex flex-col font-sans">
       {/* Navigation Header */}
       <Navbar
         onOpenAdmin={() => setIsAdminOpen(true)}
         onOpenReport={() => setIsReportOpen(true)}
+        onOpenSecurity={() => setIsSecurityOpen(true)}
         onExportExcel={() => exportToExcel(students, rooms)}
         onExportPDF={(mode) => exportToPDF(students, rooms, mode)}
         onClearAllData={handleClearAllData}
@@ -440,6 +461,13 @@ export default function App() {
           onClose={() => setIsReportOpen(false)}
           onExportExcel={() => exportToExcel(students, rooms)}
           onExportPDF={(mode) => exportToPDF(students, rooms, mode)}
+        />
+      )}
+
+      {/* Security & Users Modal */}
+      {isSecurityOpen && (
+        <UserManagementModal
+          onClose={() => setIsSecurityOpen(false)}
         />
       )}
 

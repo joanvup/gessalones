@@ -7,12 +7,16 @@ import {
   SlidersHorizontal, 
   Database,
   BarChart3,
-  Trash2
+  Trash2,
+  Shield,
+  LogOut
 } from 'lucide-react';
+import { useAuth } from './AuthContext';
 
 interface NavbarProps {
   onOpenAdmin: () => void;
   onOpenReport: () => void;
+  onOpenSecurity: () => void;
   onExportExcel: () => void;
   onExportPDF: (mode: 'complete_report' | 'door_sheets') => void;
   onClearAllData: () => void;
@@ -24,6 +28,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   onOpenAdmin,
   onOpenReport,
+  onOpenSecurity,
   onExportExcel,
   onExportPDF,
   onClearAllData,
@@ -32,6 +37,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   totalStudents,
 }) => {
   const [pdfMenuOpen, setPdfMenuOpen] = React.useState(false);
+  const { user, logout } = useAuth();
 
   return (
     <header className="sticky top-0 z-30 bg-slate-900 border-b border-slate-800 text-white shadow-md">
@@ -52,13 +58,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400 hidden md:block">
-                Distribución equitativa y administración de cupos por aula
+                Hola, {user?.username} ({user?.role})
               </p>
             </div>
           </div>
 
           {/* Quick Metrics & Actions */}
           <div className="flex items-center space-x-2 sm:space-x-3">
+            
+            <button
+              onClick={onOpenSecurity}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all active:scale-95"
+            >
+              <Shield className="w-4 h-4 text-purple-400" />
+              <span className="hidden sm:inline">Seguridad</span>
+            </button>
+
             {hasData && (
               <>
                 <button
@@ -144,6 +159,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
               </>
             )}
+
+            <button
+              onClick={logout}
+              title="Cerrar sesión"
+              className="ml-2 inline-flex items-center justify-center p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
+
           </div>
         </div>
       </div>
