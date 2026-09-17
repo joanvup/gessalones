@@ -1,0 +1,6 @@
+{
+  "name": "Gestor de Distribución de Estudiantes en Salones",
+  "description": "Sistema para asignación y distribución aleatoria de estudiantes en salones de clase con soporte de archivos Excel XLS/XLSX, filtros por nivel académico, panel de edición manual y exportación a PDF y Excel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
