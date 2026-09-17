@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import { createServer as createViteServer } from 'vite';
 
 const app = express();
@@ -9,8 +9,8 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
-// Built-in SQLite Setup (Compatible with Node 20+)
-const db = new Database('./database.sqlite');
+// Built-in SQLite Setup (Node >= 22.5)
+const db = new DatabaseSync('./database.sqlite');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS students (
