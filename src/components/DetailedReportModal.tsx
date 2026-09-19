@@ -1,15 +1,17 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { 
   X, 
   Printer, 
   FileSpreadsheet, 
   FileText, 
-  CheckCircle2, 
-  AlertTriangle,
   Building2,
   Users,
   Layers,
-  Calendar
+  Calendar,
+  Sparkles,
+  PieChart,
+  CheckCircle2,
+  Filter
 } from 'lucide-react';
 import { ClassroomGroup, Student } from '../types';
 
@@ -28,14 +30,17 @@ export const DetailedReportModal: React.FC<DetailedReportModalProps> = ({
   onExportExcel,
   onExportPDF,
 }) => {
+  const [levelFilter, setLevelFilter] = useState<string>('ALL');
+  const [groupingField, setGroupingField] = useState<'group' | 'level'>('group');
+
   const totalStudents = students.length;
   const assignedStudents = students.filter(s => !!s.assignedRoomId).length;
   const unassigned = totalStudents - assignedStudents;
   const totalCapacity = rooms.reduce((sum, r) => sum + r.capacity, 0);
   const occupancyRate = totalCapacity > 0 ? Math.round((assignedStudents / totalCapacity) * 100) : 0;
 
-  // Group by academic level
-  const levels = Array.from(new Set([...students.map(s => s.academicLevel), ...rooms.map(r => r.academicLevel)]));
+  // Group by academic level for Section 1
+  const levels = Array.from(new Set([...students.map(s => s.academicLevel), ...rooms.map(r => r.academicLevel)].filter(Boolean)));
   const levelStats = levels.map(level => {
     const lvlStudents = students.filter(s => s.academicLevel === level);
     const lvlRooms = rooms.filter(r => r.academicLevel === level);
@@ -51,6 +56,82 @@ export const DetailedReportModal: React.FC<DetailedReportModalProps> = ({
     };
   });
 
+  // Calculate Demographic Matrix (Students of each group per room)
+  const { uniqueCategories, demographicMatrix, categoryTotals, grandAssignedTotal } = useMemo(() => {
+    // 1. Determine unique categories (e.g. groups "10A", "10B" or academic levels)
+    const catSet = new Set<string>();
+    students.forEach(s => {
+      const val = groupingField === 'group' 
+        ? (s.originalGroup || (s as any).group || 'Sin Grupo').trim()
+        : (s.academicLevel || 'Sin Nivel').trim();
+      if (val) catSet.add(val);
+    });
+
+    const uniqueCategories = Array.from(catSet).sort((a, b) => 
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+    );
+
+    const categoryTotals: Record<string, number> = {};
+    uniqueCategories.forEach(cat => { categoryTotals[cat] = 0; });
+    let grandAssignedTotal = 0;
+
+    // 2. Build rows for each room
+    const demographicMatrix = rooms.map(room => {
+      // Find all students in this room (matching assignedRoomId or assignedStudentIds)
+      const roomStudents = students.filter(
+        s => s.assignedRoomId === room.id || room.assignedStudentIds.includes(s.id)
+      );
+
+      const counts: Record<string, number> = {};
+      uniqueCategories.forEach(cat => { counts[cat] = 0; });
+
+      roomStudents.forEach(s => {
+        const val = groupingField === 'group' 
+          ? (s.originalGroup || (s as any).group || 'Sin Grupo').trim()
+          : (s.academicLevel || 'Sin Nivel').trim();
+        
+        if (counts[val] !== undefined) {
+          counts[val] = (counts[val] || 0) + 1;
+          categoryTotals[val] = (categoryTotals[val] || 0) + 1;
+        }
+      });
+
+      grandAssignedTotal += roomStudents.length;
+
+      return {
+        room,
+        assignedCount: roomStudents.length,
+        counts,
+      };
+    });
+
+    return { uniqueCategories, demographicMatrix, categoryTotals, grandAssignedTotal };
+  }, [students, rooms, groupingField]);
+
+  // Filter demographic matrix by academic level if selected
+  const filteredMatrix = useMemo(() => {
+    if (levelFilter === 'ALL') return demographicMatrix;
+    return demographicMatrix.filter(item => item.room.academicLevel === levelFilter);
+  }, [demographicMatrix, levelFilter]);
+
+  // Filtered totals
+  const filteredTotals = useMemo(() => {
+    const totals: Record<string, number> = {};
+    uniqueCategories.forEach(cat => { totals[cat] = 0; });
+    let totalAssigned = 0;
+    let totalCapacity = 0;
+
+    filteredMatrix.forEach(item => {
+      totalAssigned += item.assignedCount;
+      totalCapacity += item.room.capacity;
+      uniqueCategories.forEach(cat => {
+        totals[cat] += (item.counts[cat] || 0);
+      });
+    });
+
+    return { totals, totalAssigned, totalCapacity };
+  }, [filteredMatrix, uniqueCategories]);
+
   const currentDate = new Date().toLocaleDateString('es-ES', {
     weekday: 'long',
     year: 'numeric',
@@ -64,13 +145,13 @@ export const DetailedReportModal: React.FC<DetailedReportModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="bg-white rounded-2xl max-w-5xl w-full max-h-[92vh] shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
+      <div className="bg-white rounded-2xl max-w-6xl w-full max-h-[92vh] shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
         {/* Modal Top Bar */}
         <div className="p-4 bg-slate-900 text-white flex items-center justify-between no-print">
           <div className="flex items-center gap-2">
             <Building2 className="w-5 h-5 text-indigo-400" />
             <h2 className="text-sm sm:text-base font-bold">
-              Reporte Detallado de Distribución de Estudiantes
+              Reporte Detallado y Demográfico de Salones
             </h2>
           </div>
 
@@ -158,11 +239,212 @@ export const DetailedReportModal: React.FC<DetailedReportModalProps> = ({
             </div>
           </div>
 
+          {/* NUEVO BLOQUE VISUAL: Tabla de Resumen y Composición de Estudiantes por Grupo en cada Salón */}
+          <div className="space-y-3.5 bg-slate-50/70 border border-slate-200 p-4 sm:p-5 rounded-2xl shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+              <div>
+                <h3 className="text-sm sm:text-base font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                  <PieChart className="w-5 h-5 text-indigo-600" />
+                  1. Resumen de Estudiantes por Grupo en cada Salón
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Calcula y visualiza la cantidad de alumnos de cada grupo académico distribuidos en cada aula
+                </p>
+              </div>
+
+              {/* Group Selector & Filter Controls */}
+              <div className="flex flex-wrap items-center gap-2 no-print">
+                <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200 text-xs">
+                  <span className="text-slate-500 px-1 text-[11px] font-medium">Agrupar por:</span>
+                  <button
+                    onClick={() => setGroupingField('group')}
+                    className={`px-2.5 py-1 rounded font-semibold transition-all ${
+                      groupingField === 'group'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                    }`}
+                  >
+                    Grupo Origen
+                  </button>
+                  <button
+                    onClick={() => setGroupingField('level')}
+                    className={`px-2.5 py-1 rounded font-semibold transition-all ${
+                      groupingField === 'level'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                    }`}
+                  >
+                    Nivel Académico
+                  </button>
+                </div>
+
+                {levels.length > 1 && (
+                  <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200 text-xs">
+                    <Filter className="w-3.5 h-3.5 text-slate-400 ml-1" />
+                    <select
+                      value={levelFilter}
+                      onChange={(e) => setLevelFilter(e.target.value)}
+                      className="bg-transparent text-slate-700 font-semibold text-xs border-none focus:outline-none cursor-pointer pr-1"
+                    >
+                      <option value="ALL">Todos los niveles</option>
+                      {levels.map(lvl => (
+                        <option key={lvl} value={lvl}>{lvl}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Matrix Table */}
+            <div className="border border-slate-200 bg-white rounded-xl overflow-hidden shadow-xs">
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-200 text-xs">
+                  <thead className="bg-slate-100 text-slate-800 font-bold">
+                    <tr>
+                      <th className="px-4 py-3 text-left min-w-[160px] sticky left-0 z-10 bg-slate-100 shadow-r-sm">
+                        Salón / Aula
+                      </th>
+                      <th className="px-3 py-3 text-left min-w-[110px]">Nivel</th>
+                      <th className="px-3 py-3 text-center min-w-[75px]">Capacidad</th>
+                      <th className="px-3 py-3 text-center min-w-[75px]">Asignados</th>
+                      <th className="px-3 py-3 text-center min-w-[80px]">Ocupación</th>
+                      
+                      {/* Dynamic columns per student group */}
+                      {uniqueCategories.map(cat => (
+                        <th 
+                          key={cat} 
+                          className="px-3 py-3 text-center min-w-[75px] bg-slate-200/60 border-l border-slate-200 text-indigo-950 font-extrabold"
+                        >
+                          <div className="inline-block px-2 py-0.5 rounded bg-white/90 border border-slate-300/80 shadow-xs">
+                            {groupingField === 'group' ? `Gr. ${cat}` : cat}
+                          </div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {filteredMatrix.map(({ room, assignedCount, counts }, idx) => {
+                      const occPct = room.capacity > 0 ? Math.round((assignedCount / room.capacity) * 100) : 0;
+                      return (
+                        <tr 
+                          key={room.id}
+                          className={`hover:bg-indigo-50/40 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}
+                        >
+                          {/* Room Name Column */}
+                          <td className="px-4 py-2.5 font-bold text-slate-900 sticky left-0 z-10 bg-inherit shadow-r-sm">
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-indigo-600 shrink-0" />
+                              <span>Salón {room.name}</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-normal block pl-3.5">
+                              Dir: {room.director}
+                            </span>
+                          </td>
+
+                          <td className="px-3 py-2.5 text-slate-600 font-medium">
+                            <span className="px-2 py-0.5 rounded text-[11px] bg-slate-100 text-slate-700">
+                              {room.academicLevel || 'General'}
+                            </span>
+                          </td>
+
+                          <td className="px-3 py-2.5 text-center text-slate-600 font-medium">
+                            {room.capacity}
+                          </td>
+
+                          <td className="px-3 py-2.5 text-center font-bold text-slate-900">
+                            {assignedCount}
+                          </td>
+
+                          <td className="px-3 py-2.5 text-center">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              occPct > 100 
+                                ? 'bg-rose-100 text-rose-700' 
+                                : occPct >= 90 
+                                ? 'bg-amber-100 text-amber-700' 
+                                : 'bg-emerald-100 text-emerald-700'
+                            }`}>
+                              {occPct}%
+                            </span>
+                          </td>
+
+                          {/* Student count per group */}
+                          {uniqueCategories.map(cat => {
+                            const count = counts[cat] || 0;
+                            return (
+                              <td 
+                                key={cat} 
+                                className={`px-3 py-2.5 text-center border-l border-slate-100 ${
+                                  count > 0 
+                                    ? 'bg-indigo-50/50 font-bold text-indigo-900' 
+                                    : 'text-slate-300'
+                                }`}
+                              >
+                                {count > 0 ? (
+                                  <span className="inline-flex items-center justify-center min-w-[22px] h-[20px] px-1.5 rounded bg-indigo-100 text-indigo-800 text-[11px] font-bold">
+                                    {count}
+                                  </span>
+                                ) : (
+                                  '—'
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+
+                  {/* Summary Totals Row */}
+                  <tfoot>
+                    <tr className="bg-slate-100/90 font-extrabold text-slate-900 border-t-2 border-slate-300 text-xs">
+                      <td className="px-4 py-3 sticky left-0 z-10 bg-slate-100 shadow-r-sm">
+                        TOTAL CONSOLIDADO
+                      </td>
+                      <td className="px-3 py-3 text-slate-500">—</td>
+                      <td className="px-3 py-3 text-center">{filteredTotals.totalCapacity}</td>
+                      <td className="px-3 py-3 text-center text-indigo-700 text-sm">
+                        {filteredTotals.totalAssigned}
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        {filteredTotals.totalCapacity > 0
+                          ? `${Math.round((filteredTotals.totalAssigned / filteredTotals.totalCapacity) * 100)}%`
+                          : '0%'}
+                      </td>
+
+                      {/* Column Totals for Groups */}
+                      {uniqueCategories.map(cat => (
+                        <td 
+                          key={cat} 
+                          className="px-3 py-3 text-center border-l border-slate-300 bg-slate-200/80 text-indigo-950 font-black text-xs"
+                        >
+                          {filteredTotals.totals[cat] || 0}
+                        </td>
+                      ))}
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            {/* Helper Caption */}
+            <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
+              <span className="flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                Los valores numéricos representan la cantidad de estudiantes de ese grupo en el salón respectivo.
+              </span>
+              <span>
+                Total de grupos identificados: <strong className="text-slate-800">{uniqueCategories.length}</strong>
+              </span>
+            </div>
+          </div>
+
           {/* Table: Breakdown by Academic Level */}
           <div className="space-y-3">
             <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
               <Layers className="w-4 h-4 text-indigo-600" />
-              1. Balance por Nivel Académico
+              2. Balance por Nivel Académico
             </h3>
             <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
               <table className="min-w-full divide-y divide-slate-200 text-xs">
@@ -209,7 +491,7 @@ export const DetailedReportModal: React.FC<DetailedReportModalProps> = ({
           <div className="space-y-3">
             <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
               <Building2 className="w-4 h-4 text-indigo-600" />
-              2. Consolidado por Aula y Director de Grupo
+              3. Consolidado por Aula y Director de Grupo
             </h3>
             <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
               <table className="min-w-full divide-y divide-slate-200 text-xs">
@@ -282,3 +564,4 @@ export const DetailedReportModal: React.FC<DetailedReportModalProps> = ({
     </div>
   );
 };
+

@@ -44,7 +44,63 @@ export function exportToExcel(students: Student[], rooms: ClassroomGroup[], scho
   XLSX.utils.sheet_add_json(wsSummary, roomsSummary, { origin: 'A14' });
   XLSX.utils.book_append_sheet(wb, wsSummary, 'Resumen General');
 
-  // 2. Listado Maestro Completo
+  // 2. NUEVA HOJA: Resumen Demográfico de Estudiantes por Grupo en cada Salón
+  const uniqueGroups = Array.from(new Set(students.map(s => (s.originalGroup || (s as any).group || 'Sin Grupo').trim()).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+  const groupTotals: Record<string, number> = {};
+  uniqueGroups.forEach(g => { groupTotals[g] = 0; });
+  let totalAssignedAll = 0;
+
+  const demographicRows = rooms.map(room => {
+    const roomStudents = students.filter(s => s.assignedRoomId === room.id || room.assignedStudentIds.includes(s.id));
+    const counts: Record<string, number> = {};
+    uniqueGroups.forEach(g => { counts[g] = 0; });
+
+    roomStudents.forEach(s => {
+      const g = (s.originalGroup || (s as any).group || 'Sin Grupo').trim();
+      if (counts[g] !== undefined) {
+        counts[g] = (counts[g] || 0) + 1;
+        groupTotals[g] = (groupTotals[g] || 0) + 1;
+      }
+    });
+
+    totalAssignedAll += roomStudents.length;
+
+    const rowObj: Record<string, string | number> = {
+      'Salón': room.name,
+      'Director(a)': room.director,
+      'Nivel Académico': room.academicLevel,
+      'Capacidad': room.capacity,
+      'Total Asignados': roomStudents.length,
+      'Ocupación': room.capacity > 0 ? `${Math.round((roomStudents.length / room.capacity) * 100)}%` : '0%',
+    };
+
+    uniqueGroups.forEach(g => {
+      rowObj[`Grupo ${g}`] = counts[g] || 0;
+    });
+
+    return rowObj;
+  });
+
+  // Fila de Total General
+  const totalRowObj: Record<string, string | number> = {
+    'Salón': 'TOTAL GENERAL',
+    'Director(a)': '—',
+    'Nivel Académico': '—',
+    'Capacidad': totalCap,
+    'Total Asignados': totalAssignedAll,
+    'Ocupación': totalCap > 0 ? `${Math.round((totalAssignedAll / totalCap) * 100)}%` : '0%',
+  };
+  uniqueGroups.forEach(g => {
+    totalRowObj[`Grupo ${g}`] = groupTotals[g] || 0;
+  });
+  demographicRows.push(totalRowObj);
+
+  const wsDemographic = XLSX.utils.json_to_sheet(demographicRows);
+  XLSX.utils.book_append_sheet(wb, wsDemographic, 'Estudiantes por Grupo');
+
+  // 3. Listado Maestro Completo
   const roomMap = new Map<string, ClassroomGroup>();
   rooms.forEach(r => roomMap.set(r.id, r));
 
@@ -260,6 +316,60 @@ export function exportToPDF(
     styles: { fontSize: 8.5 },
     headStyles: { fillColor: [30, 41, 59] },
     alternateRowStyles: { fillColor: [248, 250, 252] },
+  });
+
+  // Table of Demographic Distribution (Students per Group per Room)
+  const uniqueGroupsPdf = Array.from(new Set(students.map(s => (s.originalGroup || (s as any).group || 'Sin Grupo').trim()).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+  const demoPdfRows = rooms.map(room => {
+    const roomStudents = students.filter(s => s.assignedRoomId === room.id || room.assignedStudentIds.includes(s.id));
+    const counts: Record<string, number> = {};
+    uniqueGroupsPdf.forEach(g => { counts[g] = 0; });
+    roomStudents.forEach(s => {
+      const g = (s.originalGroup || (s as any).group || 'Sin Grupo').trim();
+      if (counts[g] !== undefined) counts[g]++;
+    });
+
+    const row: string[] = [
+      room.name,
+      room.academicLevel,
+      String(room.capacity),
+      String(roomStudents.length),
+    ];
+    uniqueGroupsPdf.forEach(g => {
+      row.push(String(counts[g] || 0));
+    });
+    return row;
+  });
+
+  const demoPdfHeaders = [
+    'Salón',
+    'Nivel',
+    'Cap.',
+    'Total',
+    ...uniqueGroupsPdf.map(g => `Gr. ${g}`)
+  ];
+
+  doc.addPage();
+  doc.setFillColor(30, 41, 59);
+  doc.rect(14, 14, 182, 18, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text('RESUMEN DEMOGRÁFICO: ESTUDIANTES POR GRUPO EN CADA SALÓN', 20, 25);
+
+  autoTable(doc, {
+    startY: 38,
+    head: [demoPdfHeaders],
+    body: demoPdfRows,
+    styles: { fontSize: 8, cellPadding: 2, halign: 'center' },
+    headStyles: { fillColor: [51, 65, 85], fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
+    columnStyles: {
+      0: { halign: 'left', fontStyle: 'bold' },
+      1: { halign: 'left' },
+    },
   });
 
   // 2. Each Classroom's complete list
